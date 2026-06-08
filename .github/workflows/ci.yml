@@ -18,15 +18,14 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app
 
-      - name: Build
+      - name: Build and Test
         run: |
           cd ios
-          xcodebuild -project MyApp.xcodeproj \
+          xcodebuild test -project MyApp.xcodeproj \
             -scheme MyApp \
             -sdk iphonesimulator \
             -destination 'platform=iOS Simulator,name=iPhone 16' \
-            -quiet \
-            build
+            -quiet
 
   build-firebase-functions:
     name: Build Firebase Functions

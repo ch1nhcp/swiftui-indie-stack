@@ -24,14 +24,14 @@ MVVM is a natural fit for SwiftUI because Apple's property wrappers map directly
 | Component | Role | SwiftUI Implementation |
 |-----------|------|------------------------|
 | **Model** | Data structures | `Codable` structs |
-| **ViewModel** | State + business logic | `ObservableObject` with `@Published` properties |
-| **View** | UI rendering | SwiftUI views observing ViewModels |
+| **ViewModel** | State + business logic | `@Observable` classes with plain properties |
+| **View** | UI rendering | SwiftUI views observing ViewModels via `@State` |
 
 **Benefits for this starter kit:**
 
-- **Testable**: Business logic lives in ViewModels, separate from UI
+- **Testable**: Business logic lives in ViewModels, separate from UI. Protocols enable dependency injection for test mocks.
 - **Scalable**: Add features without rewiring existing code
-- **SwiftUI-native**: Uses `@StateObject`, `@ObservedObject`, `@Published` as intended
+- **SwiftUI-native**: Uses `@Observable` and `@State` as Apple recommends for iOS 17+
 - **Approachable**: Most iOS tutorials and documentation use MVVM
 
 ### Why Not Other Patterns?
@@ -85,13 +85,13 @@ Library/
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         SwiftUI View                            │
-│                    @StateObject viewModel                       │
+│                      @State viewModel                           │
 └─────────────────────────┬───────────────────────────────────────┘
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                      ViewModel                                  │
-│              @Published properties                              │
+│                   @Observable ViewModel                         │
+│            Properties tracked automatically                     │
 │         Business logic, data transformation                     │
 └─────────────────────────┬───────────────────────────────────────┘
                           │
@@ -104,17 +104,17 @@ Library/
 ```
 
 ### Read Flow
-1. View observes ViewModel's `@Published` properties
+1. View observes ViewModel properties (tracked automatically by `@Observable`)
 2. ViewModel fetches from local storage first (cache)
 3. If Firebase enabled, ViewModel also fetches from Firestore
-4. ViewModel updates `@Published` properties
+4. ViewModel updates properties
 5. View automatically re-renders
 
 ### Write Flow
 1. View calls ViewModel method (e.g., `save()`)
 2. ViewModel writes to local storage immediately
 3. If Firebase enabled, ViewModel also writes to Firestore
-4. ViewModel updates `@Published` properties
+4. ViewModel updates properties → View re-renders
 
 ---
 
@@ -158,14 +158,16 @@ struct YourItem: Codable, Identifiable {
 import Foundation
 import SwiftUI
 
-class YourViewModel: ObservableObject {
+@Observable
+class YourViewModel {
 
-    // MARK: - Published State (UI binds to these)
-    @Published var items: [YourItem] = []
-    @Published var isLoading = false
-    @Published var errorMessage: String?
+    // MARK: - State (tracked automatically by @Observable)
+    var items: [YourItem] = []
+    var isLoading = false
+    var errorMessage: String?
 
     // MARK: - Dependencies
+    @ObservationIgnored
     private let storageKey = "your_items"
 
     // MARK: - Singleton (if needed app-wide)
@@ -239,7 +241,7 @@ class YourViewModel: ObservableObject {
 import SwiftUI
 
 struct YourListView: View {
-    @StateObject private var viewModel = YourViewModel.shared
+    @State private var viewModel = YourViewModel.shared
 
     var body: some View {
         NavigationView {
@@ -369,12 +371,13 @@ Button("Subscribe") {
 When generating code for this project:
 
 1. **Follow the Library/ pattern** - It's the canonical example
-2. **Use ObservableObject + @Published** - Not @Observable (iOS 17 only)
-3. **Always add Analytics** - `Analytics.trackScreenView()` in Views
-4. **Check AppConfiguration** - Respect feature flags
-5. **Use #if canImport()** - For optional dependencies
-6. **Prefer UserDefaults** - For simple local storage
-7. **Follow existing naming** - Match the conventions above
+2. **Use `@Observable`** - With `@State` in the owning view, plain `var` in child views
+3. **Use `async/await`** - Not Combine for network calls and async work
+4. **Always add Analytics** - `Analytics.trackScreenView()` in Views
+5. **Check AppConfiguration** - Respect feature flags
+6. **Use #if canImport()** - For optional dependencies
+7. **Prefer UserDefaults** - For simple local storage
+8. **Follow existing naming** - Match the conventions above
 
 When modifying existing features:
 1. Read the existing code first
@@ -389,10 +392,11 @@ When modifying existing features:
 ### Loading State
 
 ```swift
-@Published var isLoading = false
-@Published var errorMessage: String?
+var isLoading = false
+var errorMessage: String?
 
-func fetch() {
+@MainActor
+func fetch() async {
     isLoading = true
     errorMessage = nil
 
@@ -405,8 +409,8 @@ func fetch() {
 ### List with Search
 
 ```swift
-@Published var items: [Item] = []
-@Published var searchText = ""
+var items: [Item] = []
+var searchText = ""
 
 var filteredItems: [Item] {
     if searchText.isEmpty {

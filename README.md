@@ -243,9 +243,9 @@ npm run deploy
 
 ## Requirements
 
-- iOS 17.0+
-- Xcode 15.0+
-- Swift 5.9+
+- iOS 26.0+
+- Xcode 26.0+
+- Swift 6.1+
 
 ## Customization
 
