@@ -6,22 +6,16 @@
 //
 
 import SwiftUI
-import Combine
 import MarkdownUI
 
 struct LibraryDetailView: View {
     let entry: LibraryEntry
-    @ObservedObject var viewModel: LibraryViewModel
+    var viewModel: LibraryViewModel
 
     @State private var content: String = ""
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var imageLoadError = false
-
-    private class CancelBag {
-        var cancellables = Set<AnyCancellable>()
-    }
-    private let cancelBag = CancelBag()
 
     var body: some View {
         ScrollView {
@@ -94,7 +88,7 @@ struct LibraryDetailView: View {
                                 .padding()
 
                             Button("Try Again") {
-                                loadContent()
+                                Task { await loadContent() }
                             }
                             .primaryStyle()
                             .frame(width: 150)
@@ -112,8 +106,8 @@ struct LibraryDetailView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            loadContent()
+        .task {
+            await loadContent()
             Analytics.track(
                 event: "library.view.entry",
                 parameters: [
@@ -166,24 +160,18 @@ struct LibraryDetailView: View {
         return formatter.string(from: date)
     }
 
-    private func loadContent() {
+    @MainActor
+    private func loadContent() async {
         isLoading = true
         errorMessage = nil
 
-        viewModel.fetchEntryContent(for: entry)
-            .receive(on: DispatchQueue.main)
-            .sink(
-                receiveCompletion: { completion in
-                    if case .failure(let error) = completion {
-                        self.errorMessage = error.localizedDescription
-                    }
-                    self.isLoading = false
-                },
-                receiveValue: { content in
-                    self.content = content
-                }
-            )
-            .store(in: &cancelBag.cancellables)
+        do {
+            content = try await viewModel.fetchEntryContent(for: entry)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+
+        isLoading = false
     }
 }
 

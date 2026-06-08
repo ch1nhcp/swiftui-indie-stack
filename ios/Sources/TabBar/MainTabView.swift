@@ -84,7 +84,7 @@ struct MainTabView: View {
 // MARK: - Placeholder Views (Replace with your implementations)
 
 struct HomeView: View {
-    @ObservedObject var streakProvider = StreakDataProvider.shared
+    var streakProvider = StreakDataProvider.shared
     @State private var showGoalCompleted = false
 
     /// Check if goal was already completed today

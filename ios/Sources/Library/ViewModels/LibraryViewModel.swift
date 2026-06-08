@@ -7,117 +7,39 @@
 
 import Foundation
 import SwiftUI
-import Combine
 
-class LibraryViewModel: ObservableObject {
+// MARK: - Data Source Protocol
 
-    @Published var entries: [LibraryEntry] = []
-    @Published var filteredEntries: [LibraryEntry] = []
-    @Published var selectedCategory: String?
-    @Published var availableCategories: [String] = []
-    @Published var isLoading: Bool = false
-    @Published var errorMessage: String?
-    @Published var lastUpdated: Date?
-    @Published var searchText: String = ""
+protocol LibraryDataSource: Sendable {
+    func fetchData(from url: URL) async throws -> Data
+}
 
-    /// Check if there are featured entries in current filter
-    var hasFeaturedEntries: Bool {
-        filteredEntries.contains { $0.featured == true }
+struct URLSessionDataSource: LibraryDataSource {
+    func fetchData(from url: URL) async throws -> Data {
+        let (data, _) = try await URLSession.shared.data(from: url)
+        return data
     }
+}
 
-    private var cancellables = Set<AnyCancellable>()
-    private let cacheManager = LibraryCacheManager.shared
+// MARK: - ViewModel
 
-    private let indexURL = AppConfiguration.libraryIndexURL
+@Observable
+class LibraryViewModel {
 
-    init() {
-        // Update filtered entries when search text changes
-        $searchText
-            .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
-            .sink { [weak self] _ in
-                self?.filterEntries()
-            }
-            .store(in: &cancellables)
+    var entries: [LibraryEntry] = []
+    var selectedCategory: String?
+    var isLoading: Bool = false
+    var errorMessage: String?
+    var lastUpdated: Date?
+    var searchText: String = ""
 
-        // Update filtered entries when category changes
-        $selectedCategory
-            .sink { [weak self] _ in
-                self?.filterEntries()
-            }
-            .store(in: &cancellables)
-    }
-
-    // MARK: - Fetching
-
-    func fetchEntries(forceRefresh: Bool = false) {
-        isLoading = true
-        errorMessage = nil
-
-        // Check cache first if not forcing refresh
-        if !forceRefresh,
-           let cachedIndex = cacheManager.getCachedIndex(),
-           let cachedDate = cacheManager.getIndexLastUpdated(),
-           Calendar.current.isDateInToday(cachedDate) {
-
-            processEntries(from: cachedIndex)
-            lastUpdated = cachedDate
-            isLoading = false
-            return
-        }
-
-        // Fetch from GitHub
-        guard let url = URL(string: indexURL) else {
-            errorMessage = "Invalid index URL"
-            isLoading = false
-            return
-        }
-
-        URLSession.shared.dataTaskPublisher(for: url)
-            .map(\.data)
-            .decode(type: LibraryIndex.self, decoder: JSONDecoder.libraryDecoder)
-            .receive(on: DispatchQueue.main)
-            .sink(
-                receiveCompletion: { [weak self] completion in
-                    self?.isLoading = false
-                    if case .failure(let error) = completion {
-                        self?.errorMessage = "Failed to fetch library: \(error.localizedDescription)"
-                    }
-                },
-                receiveValue: { [weak self] libraryIndex in
-                    self?.cacheManager.cacheIndex(libraryIndex)
-                    self?.processEntries(from: libraryIndex)
-                    self?.lastUpdated = libraryIndex.lastUpdated
-                }
-            )
-            .store(in: &cancellables)
-    }
-
-    private func processEntries(from index: LibraryIndex) {
-        let now = Date()
-        let sortedEntries = index.articles
-            .filter { article in
-                let isPublished = article.publishDate <= now
-                let isNotExpired = article.expiryDate == nil || article.expiryDate! >= now
-                return isPublished && isNotExpired
-            }
-            .sorted(by: { $0.publishDate > $1.publishDate })
-
-        entries = sortedEntries
-        updateAvailableCategories()
-        filterEntries()
-    }
-
-    // MARK: - Filtering
-
-    func filterEntries() {
+    var filteredEntries: [LibraryEntry] {
         var filtered = entries
 
-        // Filter by category
         if let category = selectedCategory {
             filtered = filtered.filter { $0.category == category }
         }
 
-        // Filter by search text
         if !searchText.isEmpty {
             let searchTerms = searchText.lowercased().split(separator: " ").map(String.init)
             filtered = filtered.filter { entry in
@@ -129,16 +51,98 @@ class LibraryViewModel: ObservableObject {
             }
         }
 
-        filteredEntries = filtered
+        return filtered
     }
 
-    func updateAvailableCategories() {
-        let categorySet = Set(entries.map { $0.category })
-        let sortedCategories = categorySet.sorted {
+    var availableCategories: [String] {
+        Set(entries.map { $0.category }).sorted {
             formatCategoryName($0) < formatCategoryName($1)
         }
-        availableCategories = sortedCategories
     }
+
+    var hasFeaturedEntries: Bool {
+        filteredEntries.contains { $0.featured == true }
+    }
+
+    private let cacheManager = LibraryCacheManager.shared
+    private let dataSource: LibraryDataSource
+    private let indexURL = AppConfiguration.libraryIndexURL
+
+    init(dataSource: LibraryDataSource = URLSessionDataSource()) {
+        self.dataSource = dataSource
+    }
+
+    // MARK: - Fetching
+
+    @MainActor
+    func fetchEntries(forceRefresh: Bool = false) async {
+        isLoading = true
+        errorMessage = nil
+
+        if !forceRefresh,
+           let cachedIndex = cacheManager.getCachedIndex(),
+           let cachedDate = cacheManager.getIndexLastUpdated(),
+           Calendar.current.isDateInToday(cachedDate) {
+
+            processEntries(from: cachedIndex)
+            lastUpdated = cachedDate
+            isLoading = false
+            return
+        }
+
+        guard let url = URL(string: indexURL) else {
+            errorMessage = "Invalid index URL"
+            isLoading = false
+            return
+        }
+
+        do {
+            let data = try await dataSource.fetchData(from: url)
+            let libraryIndex = try JSONDecoder.libraryDecoder.decode(LibraryIndex.self, from: data)
+            cacheManager.cacheIndex(libraryIndex)
+            processEntries(from: libraryIndex)
+            lastUpdated = libraryIndex.lastUpdated
+        } catch {
+            errorMessage = "Failed to fetch library: \(error.localizedDescription)"
+        }
+
+        isLoading = false
+    }
+
+    func processEntries(from index: LibraryIndex) {
+        let now = Date()
+        entries = index.articles
+            .filter { article in
+                let isPublished = article.publishDate <= now
+                let isNotExpired = article.expiryDate == nil || article.expiryDate! >= now
+                return isPublished && isNotExpired
+            }
+            .sorted(by: { $0.publishDate > $1.publishDate })
+    }
+
+    // MARK: - Content Fetching
+
+    func fetchEntryContent(for entry: LibraryEntry) async throws -> String {
+        let versionHash = entry.version.hashValue
+
+        if let cachedContent = cacheManager.getCachedContent(for: entry.id, version: versionHash) {
+            return cachedContent
+        }
+
+        guard let url = URL(string: entry.contentURL) else {
+            throw URLError(.badURL)
+        }
+
+        let data = try await dataSource.fetchData(from: url)
+        guard let content = String(data: data, encoding: .utf8) else {
+            throw URLError(.cannotDecodeContentData)
+        }
+
+        cacheManager.cacheContent(content, for: entry.id, version: versionHash)
+        return content
+    }
+
+    // MARK: - Helpers
 
     func resetCategory() {
         selectedCategory = nil
@@ -148,47 +152,6 @@ class LibraryViewModel: ObservableObject {
         formatCategoryName(category)
     }
 
-    // MARK: - Content Fetching
-
-    func fetchEntryContent(for entry: LibraryEntry) -> AnyPublisher<String, Error> {
-        let versionHash = entry.version.hashValue
-
-        // Check cache first
-        if let cachedContent = cacheManager.getCachedContent(for: entry.id, version: versionHash) {
-            return Just(cachedContent)
-                .setFailureType(to: Error.self)
-                .eraseToAnyPublisher()
-        }
-
-        // Fetch from GitHub
-        guard let url = URL(string: entry.contentURL) else {
-            return Fail(error: NSError(
-                domain: "",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Invalid content URL"]
-            ))
-            .eraseToAnyPublisher()
-        }
-
-        return URLSession.shared.dataTaskPublisher(for: url)
-            .map(\.data)
-            .tryMap { data -> String in
-                guard let content = String(data: data, encoding: .utf8) else {
-                    throw NSError(
-                        domain: "",
-                        code: -1,
-                        userInfo: [NSLocalizedDescriptionKey: "Invalid content encoding"]
-                    )
-                }
-                self.cacheManager.cacheContent(content, for: entry.id, version: versionHash)
-                return content
-            }
-            .eraseToAnyPublisher()
-    }
-
-    // MARK: - Helpers
-
-    /// Check if an entry is new (published within last 30 days)
     func isEntryNew(_ publishDate: Date) -> Bool {
         let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
         return publishDate > thirtyDaysAgo

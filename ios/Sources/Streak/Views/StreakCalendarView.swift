@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct StreakCalendarView: View {
-    @ObservedObject var streakProvider = StreakDataProvider.shared
+    var streakProvider = StreakDataProvider.shared
 
     @State private var currentMonth: Date = Date()
 

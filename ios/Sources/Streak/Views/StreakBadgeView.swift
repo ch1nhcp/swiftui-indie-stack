@@ -9,7 +9,7 @@ import SwiftUI
 import ConfettiSwiftUI
 
 struct StreakBadgeView: View {
-    @ObservedObject var streakProvider = StreakDataProvider.shared
+    var streakProvider = StreakDataProvider.shared
 
     @State private var confettiTrigger = 0
     @State private var isAnimating = false
@@ -83,7 +83,7 @@ struct StreakBadgeView: View {
 // MARK: - Compact Streak Badge
 
 struct CompactStreakBadge: View {
-    @ObservedObject var streakProvider = StreakDataProvider.shared
+    var streakProvider = StreakDataProvider.shared
 
     var body: some View {
         HStack(spacing: 4) {
@@ -108,7 +108,7 @@ struct CompactStreakBadge: View {
 // MARK: - Streak At Risk Banner
 
 struct StreakAtRiskBanner: View {
-    @ObservedObject var streakProvider = StreakDataProvider.shared
+    var streakProvider = StreakDataProvider.shared
 
     var body: some View {
         if streakProvider.streakData.isAtRisk && streakProvider.hasStreak {

@@ -57,3 +57,54 @@ extension StreakData {
         return Double(progress) / Double(range)
     }
 }
+
+// MARK: - Streak Calculation (Pure Logic)
+
+extension StreakData {
+    /// Calculate updated streak after recording activity on a given date.
+    /// Pure function: takes current state + date, returns new state.
+    static func calculateUpdatedStreak(from current: StreakData, on date: Date = Date()) -> StreakData {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: date)
+
+        if let lastActivity = current.lastActivityDate,
+           calendar.isDate(lastActivity, inSameDayAs: today) {
+            return current
+        }
+
+        var newCurrentStreak = current.currentStreak
+        var newStreakStart = current.streakStartDate
+
+        if let lastActivity = current.lastActivityDate {
+            let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
+
+            if calendar.isDate(lastActivity, inSameDayAs: yesterday) {
+                newCurrentStreak += 1
+            } else {
+                newCurrentStreak = 1
+                newStreakStart = today
+            }
+        } else {
+            newCurrentStreak = 1
+            newStreakStart = today
+        }
+
+        let newBestStreak = max(current.bestStreak, newCurrentStreak)
+
+        var newActiveDays = current.activeDays.filter {
+            calendar.dateComponents([.day], from: $0, to: today).day ?? 32 < 31
+        }
+        newActiveDays.append(today)
+
+        return StreakData(
+            currentStreak: newCurrentStreak,
+            bestStreak: newBestStreak,
+            lastActivityDate: today,
+            streakStartDate: newStreakStart,
+            isAtRisk: false,
+            freezesAvailable: 0,
+            freezeActive: false,
+            activeDays: newActiveDays
+        )
+    }
+}

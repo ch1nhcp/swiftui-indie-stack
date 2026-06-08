@@ -18,7 +18,6 @@
 //
 
 import Foundation
-import Combine
 import SwiftUI
 import WidgetKit
 
@@ -31,29 +30,37 @@ import FirebaseFirestore
 typealias StreakDataProvider = StreakViewModel
 
 /// Provides streak data to SwiftUI views
-class StreakViewModel: ObservableObject {
+@Observable
+class StreakViewModel {
 
     // MARK: - Singleton
 
     static let shared = StreakViewModel()
 
-    // MARK: - Published State
+    // MARK: - State
 
-    @Published var streakData: StreakData = .empty
-    @Published var isLoading: Bool = false
+    var streakData: StreakData = .empty
+    var isLoading: Bool = false
 
     // MARK: - Dependencies
 
     #if canImport(Firebase)
+    @ObservationIgnored
     private var listener: ListenerRegistration?
+    @ObservationIgnored
     private var db: Firestore?
     #endif
 
     // Local storage keys
+    @ObservationIgnored
     private let currentStreakKey = "localCurrentStreak"
+    @ObservationIgnored
     private let bestStreakKey = "localBestStreak"
+    @ObservationIgnored
     private let lastActivityKey = "localLastActivityDate"
+    @ObservationIgnored
     private let streakStartKey = "localStreakStartDate"
+    @ObservationIgnored
     private let activeDaysKey = "localActiveDays"
 
     // MARK: - Initialization
@@ -65,7 +72,6 @@ class StreakViewModel: ObservableObject {
         }
         #endif
 
-        // Load local data on init (used in local mode or as fallback)
         loadLocalData()
     }
 
@@ -74,7 +80,6 @@ class StreakViewModel: ObservableObject {
     /// Start listening to streak updates from Firestore
     func startListening(userId: String) {
         guard AppConfiguration.useFirebase else {
-            // In local mode, just load from UserDefaults
             loadLocalData()
             return
         }
@@ -153,10 +158,8 @@ class StreakViewModel: ObservableObject {
                 activeDays: activeDays
             )
 
-            // Sync to widget
             WidgetHelper.updateWidget(with: self.streakData)
 
-            // Check for app review prompt on streak milestone
             AppReviewManager.shared.requestReviewIfAppropriate(for: currentStreak)
         }
     }
@@ -185,7 +188,6 @@ class StreakViewModel: ObservableObject {
             activeDays = timestamps.map { Date(timeIntervalSince1970: $0) }
         }
 
-        // Check if streak is at risk (no activity yesterday in local mode)
         var isAtRisk = false
         if let last = lastActivityDate {
             let calendar = Calendar.current
@@ -205,7 +207,6 @@ class StreakViewModel: ObservableObject {
             activeDays: activeDays
         )
 
-        // Sync to widget
         WidgetHelper.updateWidget(with: self.streakData)
     }
 
@@ -231,81 +232,36 @@ class StreakViewModel: ObservableObject {
     /// Record activity locally (for local mode only)
     func recordLocalActivity() {
         guard !AppConfiguration.useFirebase else {
-            // In Firebase mode, activity is logged via FirestoreManager
             return
         }
 
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
+        let updated = StreakData.calculateUpdatedStreak(from: streakData)
 
-        // Check if already logged today
-        if let lastActivity = streakData.lastActivityDate,
-           calendar.isDate(lastActivity, inSameDayAs: today) {
-            return // Already logged today
+        guard updated.currentStreak != streakData.currentStreak ||
+              updated.lastActivityDate != streakData.lastActivityDate else {
+            return
         }
-
-        var newCurrentStreak = streakData.currentStreak
-        var newStreakStart = streakData.streakStartDate
-
-        if let lastActivity = streakData.lastActivityDate {
-            let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
-
-            if calendar.isDate(lastActivity, inSameDayAs: yesterday) {
-                // Continue streak
-                newCurrentStreak += 1
-            } else {
-                // Streak broken, start new
-                newCurrentStreak = 1
-                newStreakStart = today
-            }
-        } else {
-            // First activity ever
-            newCurrentStreak = 1
-            newStreakStart = today
-        }
-
-        let newBestStreak = max(streakData.bestStreak, newCurrentStreak)
-
-        // Update active days (keep last 31 days)
-        var newActiveDays = streakData.activeDays.filter {
-            calendar.dateComponents([.day], from: $0, to: today).day ?? 32 < 31
-        }
-        newActiveDays.append(today)
 
         DispatchQueue.main.async {
-            self.streakData = StreakData(
-                currentStreak: newCurrentStreak,
-                bestStreak: newBestStreak,
-                lastActivityDate: today,
-                streakStartDate: newStreakStart,
-                isAtRisk: false,
-                freezesAvailable: 0,
-                freezeActive: false,
-                activeDays: newActiveDays
-            )
+            self.streakData = updated
             self.saveLocalData()
 
-            // Sync to widget
             WidgetHelper.updateWidget(with: self.streakData)
 
-            // Check for app review prompt on streak milestone
-            AppReviewManager.shared.requestReviewIfAppropriate(for: newCurrentStreak)
+            AppReviewManager.shared.requestReviewIfAppropriate(for: updated.currentStreak)
         }
     }
 
     // MARK: - Computed Properties
 
-    /// Whether the user has an active streak
     var hasStreak: Bool {
         streakData.currentStreak > 0
     }
 
-    /// Whether this is a milestone streak (7, 30, 100, 365 days)
     var isMilestone: Bool {
         streakData.isMilestone
     }
 
-    /// Formatted streak text
     var streakText: String {
         if streakData.currentStreak == 1 {
             return "1 day"
@@ -314,7 +270,6 @@ class StreakViewModel: ObservableObject {
         }
     }
 
-    /// Whether streaks are enabled
     var isEnabled: Bool {
         AppConfiguration.enableStreaks
     }

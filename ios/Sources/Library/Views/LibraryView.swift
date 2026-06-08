@@ -8,18 +8,15 @@
 import SwiftUI
 
 struct LibraryView: View {
-    @StateObject private var viewModel = LibraryViewModel()
-    @State private var searchText = ""
+    @State private var viewModel = LibraryViewModel()
     @State private var showingSearchBar = false
 
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
                 if showingSearchBar {
-                    SearchBar(text: $searchText, onCommit: {
-                        viewModel.searchText = searchText
-                    })
-                    .padding(.horizontal)
+                    SearchBar(text: $viewModel.searchText)
+                        .padding(.horizontal)
                 }
 
                 if viewModel.isLoading && viewModel.entries.isEmpty {
@@ -27,7 +24,9 @@ struct LibraryView: View {
                 } else if viewModel.errorMessage != nil && viewModel.entries.isEmpty {
                     ErrorView(
                         errorMessage: viewModel.errorMessage ?? "Unknown error",
-                        onRetry: { viewModel.fetchEntries(forceRefresh: true) }
+                        onRetry: {
+                            Task { await viewModel.fetchEntries(forceRefresh: true) }
+                        }
                     )
                 } else {
                     contentView
@@ -41,7 +40,6 @@ struct LibraryView: View {
                         withAnimation {
                             showingSearchBar.toggle()
                             if !showingSearchBar {
-                                searchText = ""
                                 viewModel.searchText = ""
                             }
                         }
@@ -51,18 +49,17 @@ struct LibraryView: View {
                 }
 
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { viewModel.fetchEntries(forceRefresh: true) }) {
+                    Button(action: {
+                        Task { await viewModel.fetchEntries(forceRefresh: true) }
+                    }) {
                         Image(systemName: "arrow.clockwise")
                     }
                 }
             }
         }
-        .onAppear {
-            viewModel.fetchEntries()
+        .task {
+            await viewModel.fetchEntries()
             Analytics.trackScreenView("LibraryView")
-        }
-        .onChange(of: searchText) { _, newValue in
-            viewModel.searchText = newValue
         }
     }
 

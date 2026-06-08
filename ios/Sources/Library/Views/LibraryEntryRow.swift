@@ -9,7 +9,7 @@ import SwiftUI
 
 struct LibraryEntryRow: View {
     let entry: LibraryEntry
-    @ObservedObject var viewModel: LibraryViewModel
+    var viewModel: LibraryViewModel
 
     @State private var imageLoadError = false
 
